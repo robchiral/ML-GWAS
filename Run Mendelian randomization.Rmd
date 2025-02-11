@@ -1,0 +1,149 @@
+```{r}
+library(MendelianRandomization)
+
+exp <- read.csv('./MR_Input/exposures.csv')
+exp$snp <- as.character(exp$snp)
+
+outcomes <- c("afib", "cad", "celiac", "gallstone", "polyp", "t2d", "varicose", "vte")
+
+sample_sizes <- c(
+  afib_finngen = 261395,
+  ihd_finngen = 412181,
+  t2d_finngen = 400197,
+  celiac = 398506,
+  gallstone = 401832,
+  polyp = 315298,
+  varicose = 388830,
+  vte = 412181,
+  cad = 184305,
+  t2d = 455313
+)
+
+for (outcome in outcomes) {
+  in_file <- paste0("./MR_Input/out_", outcome, ".csv")
+  out_file <- paste0("./Results/mr_", outcome, ".csv")
+  out <- read.csv(in_file, colClasses=c("character", "numeric", "numeric", "numeric"))
+  out$snp <- as.character(out$snp)
+  
+  results_df <- data.frame()
+  
+  for (exposure in unique(exp$Description)) {
+    sub_exp <- exp[exp$Description == exposure, ]
+    sample_size = min(sub_exp$N[1], sample_sizes[outcome])
+    merged_data <- merge(sub_exp, out, by = "snp", suffixes = c(".exp", ".out"))
+    complete_data <- merged_data[complete.cases(merged_data$beta.exp, merged_data$se.exp, merged_data$beta.out, merged_data$se.out), ]
+  
+    if (nrow(complete_data) >= 3) {
+      MRInputObject <- mr_input(
+        bx = complete_data$beta.exp,
+        bxse = complete_data$se.exp,
+        by = complete_data$beta.out,
+        byse = complete_data$se.out
+      )
+  
+      IVW_result <- tryCatch({
+        mr_ivw(MRInputObject, model="fixed")
+      }, error = function(e) NULL)
+  
+      if (!is.null(IVW_result)) {
+        IVW_result <- list(Outcome = outcome, Exposure = exposure, Method = "IVW (fixed)", Estimate = IVW_result$Estimate,
+                           SE = IVW_result$StdError, CI_low = IVW_result$CILower, CI_up = IVW_result$CIUpper,
+                           P = IVW_result$Pvalue, SNPs = IVW_result$SNPs,
+                           Valid_SNPs = NA, Pleiotropy_P = NA, 
+                           Het_Q = NA, Het_P = NA,
+                           Fstat = IVW_result$Fstat)
+        results_df <- rbind(results_df, IVW_result)
+      }
+
+      IVW_result <- tryCatch({
+        mr_ivw(MRInputObject, model="random")
+      }, error = function(e) NULL)
+  
+      if (!is.null(IVW_result)) {
+        IVW_result <- list(Outcome = outcome, Exposure = exposure, Method = "IVW (random)", Estimate = IVW_result$Estimate,
+                           SE = IVW_result$StdError, CI_low = IVW_result$CILower, CI_up = IVW_result$CIUpper,
+                           P = IVW_result$Pvalue, SNPs = IVW_result$SNPs,
+                           Valid_SNPs = NA, Pleiotropy_P = NA, 
+                           Het_Q = NA, Het_P = NA,
+                           Fstat = IVW_result$Fstat)
+        results_df <- rbind(results_df, IVW_result)
+      }
+      
+      IVW_result <- tryCatch({
+        mr_ivw(MRInputObject, model="random", robust=TRUE)
+      }, error = function(e) NULL)
+  
+      if (!is.null(IVW_result)) {
+        IVW_result <- list(Outcome = outcome, Exposure = exposure, Method = "IVW (random, robust)", Estimate = IVW_result$Estimate,
+                           SE = IVW_result$StdError, CI_low = IVW_result$CILower, CI_up = IVW_result$CIUpper,
+                           P = IVW_result$Pvalue, SNPs = IVW_result$SNPs,
+                           Valid_SNPs = NA, Pleiotropy_P = NA, 
+                           Het_Q = NA, Het_P = NA,
+                           Fstat = IVW_result$Fstat)
+        results_df <- rbind(results_df, IVW_result)
+      }
+      
+      cML_result <- tryCatch({
+        mr_cML(MRInputObject, maxit=300, MA=TRUE, DP=FALSE, n=sample_size)
+      }, error = function(e) NULL)
+  
+      if (!is.null(cML_result)) {
+        cML_result <- list(Outcome = outcome, Exposure = exposure, Method = "mr_cML", Estimate = cML_result$Estimate,
+                           SE = cML_result$StdError, CI_low = cML_result$CILower, CI_up = cML_result$CIUpper,
+                           P = cML_result$Pvalue, SNPs = cML_result$SNPs,
+                           Valid_SNPs = NA, Pleiotropy_P = NA, 
+                           Het_Q = NA, Het_P = NA,
+                           Fstat = NA)
+        results_df <- rbind(results_df, cML_result)
+      }      
+
+      Median_result <- tryCatch({
+        mr_median(MRInputObject)
+      }, error = function(e) NULL)
+  
+      if (!is.null(Median_result)) {
+        Median_result <- list(Outcome = outcome, Exposure = exposure, Method = "Weighted median", Estimate = Median_result$Estimate,
+                              SE = Median_result$StdError, CI_low = Median_result$CILower, CI_up = Median_result$CIUpper,
+                              P = Median_result$Pvalue, SNPs = Median_result$SNPs,
+                              Valid_SNPs = NA, Pleiotropy_P = NA, 
+                              Het_Q = NA, Het_P = NA,
+                              Fstat = NA)
+        results_df <- rbind(results_df, Median_result)
+      }
+  
+      Egger_result <- tryCatch({
+        mr_egger(MRInputObject)
+      }, error = function(e) NULL)
+  
+      if (!is.null(Egger_result)) {
+        Egger_result <- list(Outcome = outcome, Exposure = exposure, Method = paste("Egger", " (", Egger_result$Model, ")", sep=""), 
+                             Estimate = Egger_result$Estimate,
+                             SE = Egger_result$StdError.Est, CI_low = Egger_result$CILower.Est, CI_up = Egger_result$CIUpper.Est,
+                             P = Egger_result$Pvalue.Est, SNPs = Egger_result$SNPs, 
+                             Valid_SNPs = NA, Pleiotropy_P = Egger_result$Pleio.pval, 
+                             Het_Q = Egger_result$Heter.Stat[1], Het_P = Egger_result$Heter.Stat[2],
+                             Fstat = NA)
+        results_df <- rbind(results_df, Egger_result)
+      }
+  
+  
+      ConMix_result <- tryCatch({
+        mr_conmix(MRInputObject)
+      }, error = function(e) NULL)
+  
+      if (!is.null(ConMix_result)) {
+        ConMix_result <- list(Outcome = outcome, Exposure = exposure, Method = "MRConMix", Estimate = ConMix_result$Estimate,
+                             SE = NA, CI_low = ConMix_result$CILower[1], CI_up = ConMix_result$CIUpper[1],
+                             P = ConMix_result$Pvalue, SNPs = ConMix_result$SNPs,
+                             Valid_SNPs = length(ConMix_result$Valid), Pleiotropy_P = NA, 
+                             Het_Q = NA, Het_P = NA,
+                             Fstat = NA)  
+        results_df <- rbind(results_df, ConMix_result)
+      }
+      
+    }
+  }
+
+  write.csv(results_df, out_file, row.names = FALSE)
+}
+```
