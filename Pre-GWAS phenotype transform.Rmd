@@ -1,0 +1,55 @@
+```{r}
+library(betareg)
+library(RNOmni)
+
+input_dir <- "./Untransformed"
+files <- list.files(input_dir, full.names = TRUE, pattern = "\\.csv$")
+
+# Process each file
+for (file in files) {
+  output_dir <- "./Input"
+  
+  # Read the CSV file
+  print(file)
+  data <- read.csv(file, sep = '\t')
+  
+  # Initialize a dataframe to store the results
+  output_data <- data[, c("FID", "IID")]
+  
+  # Get the columns to transform (excluding FID, IID, and covariates)
+  columns_to_transform <- setdiff(names(data), c("FID", "IID", "sex", "age", "PC1", "PC2", "PC3", "PC4", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10"))
+  
+  for (column in columns_to_transform) {
+    print(column)
+    # Create a copy of the data without NA values for this column
+    data_no_na <- data[!is.na(data[[column]]), ]
+    
+    # Perform betareg
+    formula <- as.formula(paste(column, "~ sex + age + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10"))
+    model <- betareg(formula, data = data_no_na, link = "logit")
+    
+    # Get the residuals and normalize them
+    normalized_residuals <- RankNorm(model$residuals)
+    
+    # Create a vector of NAs the same length as the original data
+    transformed_column <- rep(NA, nrow(data))
+    
+    # Fill in the normalized residuals where we have non-NA values
+    transformed_column[!is.na(data[[column]])] <- normalized_residuals
+    
+    # Add the transformed column to the output dataframe
+    output_data[[column]] <- transformed_column
+  }
+  
+  # Generate output file path
+  output_file_path <- paste0(output_dir, "/", basename(file))
+  
+  # Write the output to CSV
+  write.csv(output_data, output_file_path, row.names = FALSE)
+  
+  # Clear memory (Optional, depends on the size of the data and available RAM)
+  rm(list = ls())
+  gc()
+}
+```
+
